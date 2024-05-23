@@ -11,6 +11,7 @@ firebase_admin.initialize_app(cred)
 app = Flask(__name__)
 
 UPLOAD_FOLDER = "clothes_detector/dataset/"
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 
 # 루트
@@ -41,8 +42,7 @@ def upload_image():
 
     # 파일 저장
     if image_file:
-        file_path = os.path.join(UPLOAD_FOLDER)
-        image_file.save(file_path)
+        image_file.save(os.path.join(app.config['UPLOAD_FOLDER'], image_file.filename))
 
     uid = re.sub(r"[^\uAC00-\uD7A30-9a-zA-Z\s]", "", uid)
 
@@ -53,29 +53,46 @@ def upload_image():
     # 모듈 실행
     opt = detector.parse_opt()
     result = detector.main(opt)
+    print(result)
     keys = result.keys()
+
     for i in keys:
-        if str(i).find(uid) != -1:
+        if str(i).find(uid) == -1:
+            return jsonify({'error': 'not found image folder'}, 500)
+
+        else:
             cloth_name = str(i).replace(uid, '')
+            print(cloth_name)
+            if cloth_name is None:
+                return jsonify({'error': 'module execution failed'}), 503
+            # 이미지를 Google Cloud Storage에 업로드
+            bucket = storage.bucket('todays-clothes-1100f.appspot.com')
+            blob = bucket.blob(f'images/{uid}/{image_name}')
+            image_file.seek(0)
+            blob.upload_from_file(image_file)
 
-    if cloth_name is None:
-        return jsonify({'error': 'module execution failed'}), 500
-    
-    # 이미지를 Google Cloud Storage에 업로드
-    bucket = storage.bucket('todays-clothes-1100f.appspot.com')
-    blob = bucket.blob(f'images/{uid}/{image_name}')
-    blob.upload_from_file(image_file)
+            # 이미지 URL 생성
+            image_url = blob.public_url
 
-    # 이미지 URL 생성
-    image_url = blob.public_url
+            detail = result.get(i)
+            color = detail.get('color')
+            length = detail.get('length')
+            material = detail.get('material')
+            printing = detail.get('print')
+            style = detail.get('style')
 
-    # Firestore에 이미지 URL과 기타 정보 저장
-    db = firestore.client()
-    doc_ref = db.collection('users').document(uid).collection('closet').document(cloth_name)
-    doc_ref.set({
-        'imageUrl': image_url,
-        'imageName': image_name
-    })
+            # Firestore에 이미지 URL과 기타 정보 저장
+            db = firestore.client()
+            doc_ref = db.collection('users').document(uid).collection('closet').document(cloth_name)
+            doc_ref.set({
+                'imageUrl': image_url,
+                'imageName': image_name,
+                'color': color,
+                'length': length,
+                'material': material,
+                'printing': printing,
+                'style': style
+            })
 
     response_data = {
         'message': 'Data received successfully',
@@ -87,9 +104,9 @@ def upload_image():
 
 
 # 옷장 가져오기
-@app.route("/getCloset", methods=['GET'])
-def get_closet():
-    uid = request.form.get('uid')
+@app.route("/getCloset/<uid>", methods=['GET'])
+def get_closet(uid):
+    pass
 
 
 if __name__ == '__main__':
