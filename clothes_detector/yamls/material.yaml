@@ -1,0 +1,33 @@
+
+path: /home/hong/바탕화면/USG_캡스톤디자인/yolo_dataset # yamls root dir
+train: train # train images (relative to 'path') 128 images
+val: valid # val images (relative to 'path') 128 images
+test: # test images (optional)
+
+# Classes
+names:
+  0: 가죽
+  1: 네오프렌
+  2: 니트
+  3: 데님
+  4: 레이스
+  5: 린넨
+  6: 메시
+  7: 무스탕
+  8: 벨벳
+  9: 비닐/PVC
+  10: 스웨이드
+  11: 스판덱스
+  12: 시퀸/글리터
+  13: 시폰
+  14: 실크
+  15: 우븐
+  16: 울/캐시미어
+  17: 자카드
+  18: 저지
+  19: 코듀로이
+  20: 트위드
+  21: 패딩
+  22: 퍼
+  23: 플리스
+  24: 헤어 니트

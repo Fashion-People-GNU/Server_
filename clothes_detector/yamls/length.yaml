@@ -1,0 +1,18 @@
+
+path: /home/hong/바탕화면/USG_캡스톤디자인/yolo_dataset # yamls root dir
+train: train # train images (relative to 'path') 128 images
+val: valid # val images (relative to 'path') 128 images
+test: # test images (optional)
+
+# Classes
+names:
+  0: 노멀
+  1: 롱
+  2: 크롭
+  3: 니렝스
+  4: 맥시
+  5: 미니
+  6: 미디
+  7: 발목
+  8: 하프
+  9: 노말

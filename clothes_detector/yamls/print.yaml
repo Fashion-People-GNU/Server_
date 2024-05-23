@@ -1,0 +1,29 @@
+
+path: /home/hong/바탕화면/USG_캡스톤디자인/yolo_dataset # yamls root dir
+train: train # train images (relative to 'path') 128 images
+val: valid # val images (relative to 'path') 128 images
+test: # test images (optional)
+
+# Classes
+names:
+  0: 그라데이션
+  1: 그래픽
+  2: 깅엄
+  3: 도트
+  4: 레터링
+  5: 무지
+  6: 믹스
+  7: 뱀피
+  8: 스트라이프
+  9: 아가일
+  10: 지그재그
+  11: 지브라
+  12: 체크
+  13: 카무플라쥬
+  14: 타이다이
+  15: 페이즐리
+  16: 플로럴
+  17: 하운즈 투스
+  18: 하트
+  19: 해골
+  20: 호피

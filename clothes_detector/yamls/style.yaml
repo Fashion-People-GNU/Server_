@@ -1,0 +1,32 @@
+
+path: /home/hong/바탕화면/USG_캡스톤디자인/yolo_dataset # yamls root dir
+train: train # train images (relative to 'path') 128 images
+val: valid # val images (relative to 'path') 128 images
+test: # test images (optional)
+
+# Classes
+names:
+  0: 기타
+  1: 레트로
+  2: 로맨틱
+  3: 리조트
+  4: 매니시
+  5: 모던
+  6: 밀리터리
+  7: 섹시
+  8: 소피스트케이티드
+  9: 스트리트
+  10: 스포티
+  11: 아방가르드
+  12: 오리엔탈
+  13: 웨스턴
+  14: 젠더리스
+  15: 컨트리
+  16: 클래식
+  17: 키치
+  18: 톰보이
+  19: 펑크
+  20: 페미닌
+  21: 프레피
+  22: 히피
+  23: 힙합
