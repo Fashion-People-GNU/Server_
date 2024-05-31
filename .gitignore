@@ -1,2 +1,3 @@
 flask-server
-clothes_detector
+clothes_detector/dataset/
+clothes_detector/result/
