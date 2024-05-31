@@ -108,7 +108,7 @@ def image_crop(xyxy, im, gain=1.02, pad=10, square=False, BGR=False, save=True):
 @smart_inference_mode()
 def run(
     weights=ROOT / "yolov5s.pt",  # model path or triton URL
-    source=ROOT / "data/images",  # file/dir/URL/glob/screen/0(webcam)
+    source=ROOT / "dataset",  # file/dir/URL/glob/screen/0(webcam)
     data=ROOT / "data/coco128.yaml",  # yamls.yaml path
     imgsz=(640, 640),  # inference size (height, width)
     conf_thres=0.25,  # confidence threshold
@@ -236,11 +236,12 @@ def detect_clothes_feature(agnostic_nms, augment, classes, conf_thres, data, dev
                         annotator.box_label(xyxy, label, color=colors(c, True))
                     # if save_crop:
                     croped_img = image_crop(xyxy, imc, BGR=True)
-                    img_path = r"clothes_detector/result"
+                    img_path = ROOT / r"result"
 
                     r, ac = label.split(" ")
                     filename = path.split("\\")[-1].replace(".jpg", "")
                     key = filename + '_' + r + '_' + ac
+
                     results_dict[key] = {}
                     cv2.imwrite(os.path.join(img_path, rf"{key}.jpg"), croped_img)
                     for name in class_names:
@@ -248,6 +249,8 @@ def detect_clothes_feature(agnostic_nms, augment, classes, conf_thres, data, dev
                            imgsz, iou_thres, line_thickness, max_det, nosave, save_crop, source, vid_stride, view_img,
                            visualize, weights, img_path, name)
                         results_dict[key][name.replace("yolov5_", "")] = label_sub
+            else:
+                results_dict[s.split('\\')[-1].split(':')[0].replace('.jpg', '')] = "no detections"
 
 
             # Stream results
@@ -261,10 +264,11 @@ def detect_clothes_feature(agnostic_nms, augment, classes, conf_thres, data, dev
         # Print time (inference-only)
         LOGGER.info(f"{s}{'' if len(det) else '(no detections), '}{dt[1].dt * 1E3:.1f}ms")
 
+
 def detect_clothes_feature_sub(agnostic_nms, augment, classes, conf_thres, data, device, dnn, half, hide_conf, hide_labels,
                            imgsz, iou_thres, line_thickness, max_det, nosave, save_crop, source, vid_stride, view_img,
                            visualize, weights, img_path, name):
-    pt_weight_path = rf"clothes_detector/weights/{name}/weights/best.pt"
+    pt_weight_path = ROOT / rf"weights/{name}/weights/best.pt"
     # Load model
     device = select_device(device)
     model = DetectMultiBackend(pt_weight_path, device=device, dnn=dnn, data=data, fp16=half)
@@ -340,9 +344,9 @@ def detect_clothes_feature_sub(agnostic_nms, augment, classes, conf_thres, data,
 def parse_opt():
     """Parses command-line arguments for YOLOv5 detection, setting inference options and model configurations."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--weights", nargs="+", type=str, default=rf"clothes_detector/weights/yolov5_category/weights/best.pt", help="model path or triton URL")
-    parser.add_argument("--source", type=str, default=rf"clothes_detector/dataset", help="file/dir/URL/glob/screen/0(webcam)")
-    parser.add_argument("--data", type=str, default=rf"clothes_detector/yamls/category.yaml", help="(optional) yamls.yaml path")
+    parser.add_argument("--weights", nargs="+", type=str, default=ROOT / "weights/yolov5_category/weights/best.pt", help="model path or triton URL")
+    parser.add_argument("--source", type=str, default=ROOT / "dataset", help="file/dir/URL/glob/screen/0(webcam)")
+    parser.add_argument("--data", type=str, default=rf"yamls/category.yaml", help="(optional) yamls.yaml path")
     parser.add_argument("--imgsz", "--img", "--img-size", nargs="+", type=int, default=[640], help="inference size h,w")
     parser.add_argument("--conf-thres", type=float, default=0.25, help="confidence threshold")
     parser.add_argument("--iou-thres", type=float, default=0.45, help="NMS IoU threshold")
@@ -378,6 +382,7 @@ def main(opt):
     """Executes YOLOv5 model inference with given options, checking requirements before running the model."""
     check_requirements(ROOT / "requirements.txt", exclude=("tensorboard", "thop"))
     a = run(**vars(opt))
+    print(a)
     return a
 
 
