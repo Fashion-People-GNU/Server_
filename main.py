@@ -10,6 +10,8 @@ from bs4 import BeautifulSoup
 import urllib.parse
 from datetime import datetime
 
+example = "예시"
+
 cred = credentials.Certificate("flask-server/firebase/serviceAccountKey.json")
 firebase_admin.initialize_app(cred)
 db = firestore.client()
