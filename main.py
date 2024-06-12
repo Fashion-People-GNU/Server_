@@ -8,6 +8,9 @@ import os
 import requests
 from bs4 import BeautifulSoup
 import urllib.parse
+from datetime import datetime
+
+example = "예시"
 
 cred = credentials.Certificate("flask-server/firebase/serviceAccountKey.json")
 firebase_admin.initialize_app(cred)
@@ -63,6 +66,7 @@ def get_weather_info():
 @app.route('/upload', methods=['POST'])
 def upload_image():
     if 'image' not in request.files:
+        log.error('No image file found')
         return jsonify({'error': 'No image file found'}), 400
     uid = request.form.get('uid')
     image_file = request.files.get('image')
@@ -70,6 +74,7 @@ def upload_image():
     cloth_name = None
 
     if image_file.filename == '':
+        log.error('No image file name')
         return jsonify({'error': 'No image file name'}), 400
 
     # 파일 저장
@@ -113,6 +118,7 @@ def upload_image():
             material = detail.get('material')
             printing = detail.get('print')
             style = detail.get('style')
+            add_date = str(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
             # Firestore에 이미지 URL과 기타 정보 저장
             doc_ref = db.collection('users').document(uid).collection('closet').document()
@@ -124,7 +130,8 @@ def upload_image():
                 'length': length,
                 'material': material,
                 'printing': printing,
-                'style': style
+                'style': style,
+                'addDate': add_date
             })
 
     response_data = {
@@ -133,7 +140,7 @@ def upload_image():
         'image_name': image_name
     }
     log.info(str(response_data))
-    return jsonify(response_data), 200
+    return jsonify({'message': 'clothes add successfully'}), 200
 
 
 def result_folder_clear(uid):
