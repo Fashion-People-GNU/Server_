@@ -38,7 +38,6 @@ def weather():
 
     try:
         nx, ny = get_grid_coordinates(lat, lon)
-        print(f"Converted lat/lon to grid coordinates: nx={nx}, ny={ny}")
     except TypeError:
         return jsonify({'error': 'Failed to convert lat/lon to grid coordinates'}), 500
 
@@ -63,10 +62,6 @@ def get_grid_coordinates(lat, lon):
     }
 
     response = requests.get(url, params=params)
-    print(f"Request URL: {url}")
-    print(f"Request parameters: {params}")
-    print(f"Response status code: {response.status_code}")
-    print(f"Response text: {response.text}")
 
     if response.status_code == 200:
         try:
@@ -76,7 +71,6 @@ def get_grid_coordinates(lat, lon):
                     fields = line.split(',')
                     if len(fields) == 4:
                         lon, lat, x, y = fields
-                        print(f"Longitude: {lon.strip()}, Latitude: {lat.strip()}, X: {x.strip()}, Y: {y.strip()}")
                         return x.strip(), y.strip()
         except Exception as e:
             print(f"Error parsing response: {e}")
@@ -104,10 +98,6 @@ def get_weather_info(nx, ny):
     }
 
     response = requests.get(url, params=params)
-    print(f"Request URL: {url}")
-    print(f"Request parameters: {params}")
-    print(f"Weather API response status code: {response.status_code}")
-    print(f"Weather API response text: {response.text}")
 
     if response.status_code == 200:
         try:
@@ -116,42 +106,62 @@ def get_weather_info(nx, ny):
             if data['response']['header']['resultCode'] == '00':
                 items = data['response']['body']['items']['item']
 
-                temperatures = []
-                humidities = []
-                wind_speeds = []
+                max_temp = None
+                min_temp = None
+                current_temp = None
+                humidity = None
+                weather = None
+                wind_speed = None
                 weather_description = []
+
+                # 가장 최근의 TMP 값을 현재 온도로 사용
+                latest_tmp_time = None
 
                 for item in items:
                     category = item['category']
-                    if category == 'TMP':  # 기온
-                        temperatures.append(float(item['fcstValue']))
-                    elif category == 'REH':  # 습도
-                        humidities.append(float(item['fcstValue']))
-                    elif category == 'WSD':  # 풍속
-                        wind_speeds.append(float(item['fcstValue']))
-                    elif category == 'PTY':  # 강수형태
-                        weather_description.append(item['fcstValue'])
-                    print(item)  # 각 예보 데이터 출력
+                    fcst_time = item['fcstTime']
+                    fcst_value = item['fcstValue']
 
-                avg_temp = round(sum(temperatures) / len(temperatures), 1) if temperatures else None
-                avg_humidity = round(sum(humidities) / len(humidities), 1) if humidities else None
-                avg_wind_speed = round(sum(wind_speeds) / len(wind_speeds), 1) if wind_speeds else None
+                    try:
+                        fcst_value = float(fcst_value)
+                    except ValueError:
+                        if category == 'PTY' and fcst_value == '강수없음':
+                            fcst_value = 0
+                        else:
+                            continue
+
+                    if category == 'TMX':  # 최고기온
+                        max_temp = fcst_value
+                    elif category == 'TMN':  # 최저기온
+                        min_temp = fcst_value
+                    elif category == 'TMP':  # 현재기온
+                        if latest_tmp_time is None or fcst_time > latest_tmp_time:
+                            current_temp = fcst_value
+                            latest_tmp_time = fcst_time
+                    elif category == 'REH':  # 습도
+                        humidity = fcst_value
+                    elif category == 'WSD':  # 풍속
+                        wind_speed = fcst_value
+                    elif category == 'PTY':  # 강수형태
+                        weather_description.append(int(fcst_value))
 
                 # 평균 기상 상태 결정
-                if '1' in weather_description or '2' in weather_description:
-                    avg_weather = '비'
-                elif '3' in weather_description:
-                    avg_weather = '눈'
-                elif avg_humidity > 70:
-                    avg_weather = '구름 많음'
+                if 1 in weather_description or 2 in weather_description:
+                    weather = '비'
+                elif 3 in weather_description:
+                    weather = '눈'
+                elif humidity and humidity > 70:
+                    weather = '구름 많음'
                 else:
-                    avg_weather = '맑음'
+                    weather = '맑음'
 
                 weather_info = {
-                    "average_temperature": avg_temp,
-                    "average_weather": avg_weather,
-                    "average_humidity": avg_humidity,
-                    "average_wind_speed": avg_wind_speed
+                    "maxTemp": round(max_temp, 1) if max_temp is not None else None,
+                    "minTemp": round(min_temp, 1) if min_temp is not None else None,
+                    "currentTemp": round(current_temp, 1) if current_temp is not None else None,
+                    "humidity": round(humidity, 1) if humidity is not None else None,
+                    "weather": weather,
+                    "windSpeed": round(wind_speed, 1) if wind_speed is not None else None
                 }
                 return weather_info
             else:
@@ -161,15 +171,13 @@ def get_weather_info(nx, ny):
             print(f"JSON decoding failed: {e} - Response Text: {response.text}")
             return None
     else:
-        print(f"HTTP error {response.status_code}")
+        #print(f"HTTP error {response.status_code}")
         return None
-
 
 # 옷 추천
 @app.route('/clothes_propose')
 def clothes_propose():
     return 'Hello clothes propose!'
-
 
 
 
