@@ -8,7 +8,7 @@ import os
 import requests
 from bs4 import BeautifulSoup
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timedelta
 
 cred = credentials.Certificate("flask-server/firebase/serviceAccountKey.json")
 firebase_admin.initialize_app(cred)
@@ -26,7 +26,7 @@ app.config['UPLOAD_FOLDER'] = DATASET_FOLDER
 def hello_world():
     return 'Hello World!'
 
-#날씨 데이터 가져오기
+# 날씨 데이터 가져오기
 @app.route('/weather', methods=['GET'])
 def weather():
     lat = request.args.get('lat')
@@ -82,7 +82,7 @@ def get_grid_coordinates(lat, lon):
 def get_weather_info(nx, ny):
     serviceKey = "T38Xs/J3skbx5QujsH/ZfPUIDlfyGqvCcjw+DekGON1+Ul+DXg1KueJlW0zUHGEIpidKOPzgyiDqAM8jQZ/dUg=="
     base_date = datetime.now().strftime("%Y%m%d")
-    base_time = "0200"
+    base_time = (datetime.now() - timedelta(hours=1)).strftime("%H%M")
 
     url = "http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst"
     params = {
@@ -101,7 +101,6 @@ def get_weather_info(nx, ny):
     if response.status_code == 200:
         try:
             data = response.json()
-            print(data)  # 전체 응답 데이터 출력
             if data['response']['header']['resultCode'] == '00':
                 items = data['response']['body']['items']['item']
 
@@ -109,12 +108,15 @@ def get_weather_info(nx, ny):
                 min_temp = None
                 current_temp = None
                 humidity = None
-                weather = None
                 wind_speed = None
+                weather = None
                 weather_description = []
 
-                # 가장 최근의 TMP 값을 현재 온도로 사용
-                latest_tmp_time = None
+                # 현재 시간에 가장 가까운 TMP, REH, WSD 값을 찾기 위한 변수
+                nearest_tmp_time_diff = float('inf')
+                nearest_reh_time_diff = float('inf')
+                nearest_wsd_time_diff = float('inf')
+                current_time = datetime.now().strftime("%H%M")
 
                 for item in items:
                     category = item['category']
@@ -134,13 +136,20 @@ def get_weather_info(nx, ny):
                     elif category == 'TMN':  # 최저기온
                         min_temp = fcst_value
                     elif category == 'TMP':  # 현재기온
-                        if latest_tmp_time is None or fcst_time > latest_tmp_time:
+                        time_diff = abs(int(fcst_time) - int(current_time))
+                        if time_diff < nearest_tmp_time_diff:
                             current_temp = fcst_value
-                            latest_tmp_time = fcst_time
+                            nearest_tmp_time_diff = time_diff
                     elif category == 'REH':  # 습도
-                        humidity = fcst_value
+                        time_diff = abs(int(fcst_time) - int(current_time))
+                        if time_diff < nearest_reh_time_diff:
+                            humidity = fcst_value
+                            nearest_reh_time_diff = time_diff
                     elif category == 'WSD':  # 풍속
-                        wind_speed = fcst_value
+                        time_diff = abs(int(fcst_time) - int(current_time))
+                        if time_diff < nearest_wsd_time_diff:
+                            wind_speed = fcst_value
+                            nearest_wsd_time_diff = time_diff
                     elif category == 'PTY':  # 강수형태
                         weather_description.append(int(fcst_value))
 
@@ -149,7 +158,7 @@ def get_weather_info(nx, ny):
                     weather = '비'
                 elif 3 in weather_description:
                     weather = '눈'
-                elif humidity and humidity > 70:
+                elif humidity and humidity >= 70:
                     weather = '구름 많음'
                 else:
                     weather = '맑음'
@@ -162,7 +171,7 @@ def get_weather_info(nx, ny):
                     "weather": weather,
                     "windSpeed": round(wind_speed, 1) if wind_speed is not None else None
                 }
-                return weather_info
+                return jsonify({'message': 'weather successfully'}), 200
             else:
                 print(f"Error: {data['response']['header']['resultMsg']}")
                 return None
@@ -170,7 +179,6 @@ def get_weather_info(nx, ny):
             print(f"JSON decoding failed: {e} - Response Text: {response.text}")
             return None
     else:
-        #print(f"HTTP error {response.status_code}")
         return None
 
 # 옷 추천
