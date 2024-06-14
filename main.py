@@ -11,7 +11,7 @@ import urllib.parse
 from datetime import datetime
 
 
-cred = credentials.Certificate("flask-server/firebase/serviceAccountKey.json")
+cred = credentials.Certificate(r"C:/server/flask-server/firebase/serviceAccountKey.json")
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
@@ -27,38 +27,151 @@ app.config['UPLOAD_FOLDER'] = DATASET_FOLDER
 def hello_world():
     return 'Hello World!'
 
+#날씨 데이터 가져오기
+@app.route('/weather', methods=['GET'])
+def weather():
+    lat = request.args.get('lat')
+    lon = request.args.get('lon')
 
-# 옷 추천
-@app.route('/clothes_propose')
-def propose_cloth():
-    weather_info = get_weather_info()
+    if not lat or not lon:
+        return jsonify({'error': 'Latitude and Longitude are required'}), 400
+
+    try:
+        nx, ny = get_grid_coordinates(lat, lon)
+        print(f"Converted lat/lon to grid coordinates: nx={nx}, ny={ny}")
+    except TypeError:
+        return jsonify({'error': 'Failed to convert lat/lon to grid coordinates'}), 500
+
+    if nx is None or ny is None:
+        return jsonify({'error': 'Failed to convert lat/lon to grid coordinates'}), 500
+
+    weather_info = get_weather_info(nx, ny)
 
     if weather_info is None:
         return jsonify({'error': 'Failed to retrieve weather information'}), 500
 
-    # 날씨 정보를 JSON 형태로 반환
-    print(weather_info)
+    return jsonify(weather_info)
 
-    return str(weather_info)
+def get_grid_coordinates(lat, lon):
+    serviceKey = "GotqwkNXTiKLasJDV44ifA"
+    url = "https://apihub.kma.go.kr/api/typ01/cgi-bin/url/nph-dfs_xy_lonlat"
+    params = {
+        "lon": lon,
+        "lat": lat,
+        "help": "0",
+        "authKey": serviceKey
+    }
 
+    response = requests.get(url, params=params)
+    print(f"Request URL: {url}")
+    print(f"Request parameters: {params}")
+    print(f"Response status code: {response.status_code}")
+    print(f"Response text: {response.text}")
 
-def get_weather_info():
-    url = "https://www.weather.go.kr/weather/observation/currentweather.jsp"  # 경남 진주 날씨 정보 URL
-    response = requests.get(url)
-    response.encoding = 'utf-8'
+    if response.status_code == 200:
+        try:
+            lines = response.text.splitlines()
+            for line in lines:
+                if not line.startswith('#'):
+                    fields = line.split(',')
+                    if len(fields) == 4:
+                        lon, lat, x, y = fields
+                        print(f"Longitude: {lon.strip()}, Latitude: {lat.strip()}, X: {x.strip()}, Y: {y.strip()}")
+                        return x.strip(), y.strip()
+        except Exception as e:
+            print(f"Error parsing response: {e}")
+            return None, None
+    else:
+        print(f"Error response: {response.status_code}, {response.text}")
 
-    if response.status_code != 200:
+    return None, None
+
+def get_weather_info(nx, ny):
+    serviceKey = "T38Xs/J3skbx5QujsH/ZfPUIDlfyGqvCcjw+DekGON1+Ul+DXg1KueJlW0zUHGEIpidKOPzgyiDqAM8jQZ/dUg=="
+    base_date = datetime.now().strftime("%Y%m%d")
+    base_time = "0200"
+
+    url = "http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst"
+    params = {
+        "serviceKey": serviceKey,
+        "numOfRows": "1000",
+        "pageNo": "1",
+        "dataType": "JSON",
+        "base_date": base_date,
+        "base_time": base_time,
+        "nx": nx,
+        "ny": ny
+    }
+
+    response = requests.get(url, params=params)
+    print(f"Request URL: {url}")
+    print(f"Request parameters: {params}")
+    print(f"Weather API response status code: {response.status_code}")
+    print(f"Weather API response text: {response.text}")
+
+    if response.status_code == 200:
+        try:
+            data = response.json()
+            print(data)  # 전체 응답 데이터 출력
+            if data['response']['header']['resultCode'] == '00':
+                items = data['response']['body']['items']['item']
+
+                temperatures = []
+                humidities = []
+                wind_speeds = []
+                weather_description = []
+
+                for item in items:
+                    category = item['category']
+                    if category == 'TMP':  # 기온
+                        temperatures.append(float(item['fcstValue']))
+                    elif category == 'REH':  # 습도
+                        humidities.append(float(item['fcstValue']))
+                    elif category == 'WSD':  # 풍속
+                        wind_speeds.append(float(item['fcstValue']))
+                    elif category == 'PTY':  # 강수형태
+                        weather_description.append(item['fcstValue'])
+                    print(item)  # 각 예보 데이터 출력
+
+                avg_temp = round(sum(temperatures) / len(temperatures), 1) if temperatures else None
+                avg_humidity = round(sum(humidities) / len(humidities), 1) if humidities else None
+                avg_wind_speed = round(sum(wind_speeds) / len(wind_speeds), 1) if wind_speeds else None
+
+                # 평균 기상 상태 결정
+                if '1' in weather_description or '2' in weather_description:
+                    avg_weather = '비'
+                elif '3' in weather_description:
+                    avg_weather = '눈'
+                elif avg_humidity > 70:
+                    avg_weather = '구름 많음'
+                else:
+                    avg_weather = '맑음'
+
+                weather_info = {
+                    "average_temperature": avg_temp,
+                    "average_weather": avg_weather,
+                    "average_humidity": avg_humidity,
+                    "average_wind_speed": avg_wind_speed
+                }
+                return weather_info
+            else:
+                print(f"Error: {data['response']['header']['resultMsg']}")
+                return None
+        except requests.exceptions.JSONDecodeError as e:
+            print(f"JSON decoding failed: {e} - Response Text: {response.text}")
+            return None
+    else:
+        print(f"HTTP error {response.status_code}")
         return None
 
-    soup = BeautifulSoup(response.text, 'html.parser')
-    table = soup.find('table', id='weather_table')
 
-    if table is None:
-        return jsonify({'error': 'Not Found Table'}), 404
+# 옷 추천
+@app.route('/clothes_propose')
+def clothes_propose():
+    return 'Hello clothes propose!'
 
-    for row in table.tbody.find_all('tr'):
-        if row.th.text.strip() == '진주':
-            return row
+
+
 
 
 # 옷 추가
