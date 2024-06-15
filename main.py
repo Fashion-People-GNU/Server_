@@ -11,6 +11,9 @@ import urllib.parse
 from datetime import datetime, timedelta
 
 cred = credentials.Certificate("flask-server/firebase/serviceAccountKey.json")
+import urllib.parse
+import math
+
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
@@ -26,65 +29,73 @@ app.config['UPLOAD_FOLDER'] = DATASET_FOLDER
 def hello_world():
     return 'Hello World!'
 
-# 날씨 데이터 가져오기
-@app.route('/weather', methods=['GET'])
-def weather():
-    lat = request.args.get('lat')
-    lon = request.args.get('lon')
+# CSV 파일 로드
+CSV_FILE_PATH = r'C:\server\data\lat_lon_grid_utf8.csv'
+grid_data = pd.read_csv(CSV_FILE_PATH)
 
-    if not lat or not lon:
-        return jsonify({'error': 'Latitude and Longitude are required'}), 400
+def find_closest_region(lat, lon):
+    grid_data['경도(초/100)'] = grid_data['경도(초/100)'].astype(float)
+    grid_data['위도(초/100)'] = grid_data['위도(초/100)'].astype(float)
 
-    try:
-        nx, ny = get_grid_coordinates(lat, lon)
-    except TypeError:
-        return jsonify({'error': 'Failed to convert lat/lon to grid coordinates'}), 500
+    closest_row = grid_data.iloc[((grid_data['경도(초/100)'] - lon).abs() + (grid_data['위도(초/100)'] - lat).abs()).idxmin()]
 
-    if nx is None or ny is None:
-        return jsonify({'error': 'Failed to convert lat/lon to grid coordinates'}), 500
+    region_1 = closest_row['1단계']
+    region_2 = closest_row['2단계']
+    region_3 = closest_row['3단계']
+    nx = closest_row['격자 X']
+    ny = closest_row['격자 Y']
 
-    weather_info = get_weather_info(nx, ny)
+    return nx, ny, region_1, region_2, region_3
 
-    if weather_info is None:
-        return jsonify({'error': 'Failed to retrieve weather information'}), 500
-
-    return jsonify(weather_info)
-
-def get_grid_coordinates(lat, lon):
-    serviceKey = "GotqwkNXTiKLasJDV44ifA"
-    url = "https://apihub.kma.go.kr/api/typ01/cgi-bin/url/nph-dfs_xy_lonlat"
-    params = {
-        "lon": lon,
-        "lat": lat,
-        "help": "0",
-        "authKey": serviceKey
-    }
-
-    response = requests.get(url, params=params)
-
-    if response.status_code == 200:
-        try:
-            lines = response.text.splitlines()
-            for line in lines:
-                if not line.startswith('#'):
-                    fields = line.split(',')
-                    if len(fields) == 4:
-                        lon, lat, x, y = fields
-                        return x.strip(), y.strip()
-        except Exception as e:
-            print(f"Error parsing response: {e}")
-            return None, None
+# 가장 가까운 예보 시간을 계산 (초단기예보 및 실황용)
+def get_ultrashort_base_time():
+    now = datetime.now()
+    base_time = now - timedelta(minutes=(now.minute % 10) + 10)
+    if base_time.minute >= 40:
+        base_time = base_time.replace(minute=30)
     else:
-        print(f"Error response: {response.status_code}, {response.text}")
+        base_time = base_time.replace(minute=30) - timedelta(hours=1)
+    base_date = base_time.strftime("%Y%m%d")
+    base_time = base_time.strftime("%H%M")
+    return base_date, base_time
 
-    return None, None
+# 가장 가까운 예보 시간을 계산 (단기예보용)
+def get_short_base_time():
+    now = datetime.now()
+    hour = now.hour
+    if hour < 2:
+        base_time = "2300"
+        base_date = (now - timedelta(days=1)).strftime("%Y%m%d")
+    elif hour < 5:
+        base_time = "0200"
+        base_date = now.strftime("%Y%m%d")
+    elif hour < 8:
+        base_time = "0500"
+        base_date = now.strftime("%Y%m%d")
+    elif hour < 11:
+        base_time = "0800"
+        base_date = now.strftime("%Y%m%d")
+    elif hour < 14:
+        base_time = "1100"
+        base_date = now.strftime("%Y%m%d")
+    elif hour < 17:
+        base_time = "1400"
+        base_date = now.strftime("%Y%m%d")
+    elif hour < 20:
+        base_time = "1700"
+        base_date = now.strftime("%Y%m%d")
+    else:
+        base_time = "2000"
+        base_date = now.strftime("%Y%m%d")
+    return base_date, base_time
 
-def get_weather_info(nx, ny):
+
+# 현재 날씨 정보 가져오기 (초단기실황)
+def get_current_weather_info(nx, ny, region_1, region_2, region_3):
+    base_date, base_time = get_ultrashort_base_time()
     serviceKey = "T38Xs/J3skbx5QujsH/ZfPUIDlfyGqvCcjw+DekGON1+Ul+DXg1KueJlW0zUHGEIpidKOPzgyiDqAM8jQZ/dUg=="
-    base_date = datetime.now().strftime("%Y%m%d")
-    base_time = (datetime.now() - timedelta(hours=1)).strftime("%H%M")
 
-    url = "http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst"
+    url = "http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getUltraSrtNcst"
     params = {
         "serviceKey": serviceKey,
         "numOfRows": "1000",
@@ -97,97 +108,214 @@ def get_weather_info(nx, ny):
     }
 
     response = requests.get(url, params=params)
-
     if response.status_code == 200:
         try:
             data = response.json()
             if data['response']['header']['resultCode'] == '00':
                 items = data['response']['body']['items']['item']
 
-                max_temp = None
-                min_temp = None
                 current_temp = None
                 humidity = None
                 wind_speed = None
-                weather = None
-                weather_description = []
-
-                # 현재 시간에 가장 가까운 TMP, REH, WSD 값을 찾기 위한 변수
-                nearest_tmp_time_diff = float('inf')
-                nearest_reh_time_diff = float('inf')
-                nearest_wsd_time_diff = float('inf')
-                current_time = datetime.now().strftime("%H%M")
+                weather_description = None
+                sky_code = None
 
                 for item in items:
                     category = item['category']
-                    fcst_time = item['fcstTime']
-                    fcst_value = item['fcstValue']
+                    fcst_value = item['obsrValue']
 
                     try:
                         fcst_value = float(fcst_value)
                     except ValueError:
-                        if category == 'PTY' and fcst_value == '강수없음':
-                            fcst_value = 0
-                        else:
-                            continue
+                        continue
 
-                    if category == 'TMX':  # 최고기온
-                        max_temp = fcst_value
-                    elif category == 'TMN':  # 최저기온
-                        min_temp = fcst_value
-                    elif category == 'TMP':  # 현재기온
-                        time_diff = abs(int(fcst_time) - int(current_time))
-                        if time_diff < nearest_tmp_time_diff:
-                            current_temp = fcst_value
-                            nearest_tmp_time_diff = time_diff
+                    if category == 'T1H':  # 기온
+                        current_temp = fcst_value
                     elif category == 'REH':  # 습도
-                        time_diff = abs(int(fcst_time) - int(current_time))
-                        if time_diff < nearest_reh_time_diff:
-                            humidity = fcst_value
-                            nearest_reh_time_diff = time_diff
+                        humidity = fcst_value
                     elif category == 'WSD':  # 풍속
-                        time_diff = abs(int(fcst_time) - int(current_time))
-                        if time_diff < nearest_wsd_time_diff:
-                            wind_speed = fcst_value
-                            nearest_wsd_time_diff = time_diff
+                        wind_speed = fcst_value
                     elif category == 'PTY':  # 강수형태
-                        weather_description.append(int(fcst_value))
+                        weather_description = int(fcst_value)
+                    elif category == 'SKY':  # 구름상태
+                        sky_code = int(fcst_value)
 
-                # 평균 기상 상태 결정
-                if 1 in weather_description or 2 in weather_description:
+                weather = None
+                if weather_description in [1, 2, 5, 6]:  # 비, 비/눈, 빗방울, 빗방울눈날림
                     weather = '비'
-                elif 3 in weather_description:
+                elif weather_description in [3, 7]:  # 눈, 눈날림
                     weather = '눈'
-                elif humidity and humidity >= 70:
+                elif sky_code == 1:  # 맑음
+                    weather = '맑음'
+                elif sky_code == 3:  # 구름많음
                     weather = '구름 많음'
+                elif sky_code == 4:  # 흐림
+                    weather = '흐림'
+                elif humidity >=70:
+                        weather = '구름많음'
                 else:
                     weather = '맑음'
 
                 weather_info = {
-                    "maxTemp": round(max_temp, 1) if max_temp is not None else None,
-                    "minTemp": round(min_temp, 1) if min_temp is not None else None,
-                    "currentTemp": round(current_temp, 1) if current_temp is not None else None,
-                    "humidity": round(humidity, 1) if humidity is not None else None,
+                    "region": f"{region_1} {region_2} ",
+                    "currentTemp": current_temp,
+                    "humidity": humidity,
                     "weather": weather,
-                    "windSpeed": round(wind_speed, 1) if wind_speed is not None else None
+                    "windSpeed": wind_speed
                 }
-                return jsonify({'message': 'weather successfully'}), 200
+
+                return weather_info
             else:
-                print(f"Error: {data['response']['header']['resultMsg']}")
+                log.error(f"Error: {data['response']['header']['resultMsg']}")
                 return None
         except requests.exceptions.JSONDecodeError as e:
-            print(f"JSON decoding failed: {e} - Response Text: {response.text}")
+            log.error(f"JSON decoding failed: {e} - Response text: {response.text}")
             return None
     else:
+        log.error(f"HTTP error {response.status_code}")
         return None
 
-# 옷 추천
-@app.route('/clothes_propose')
+
+# 하루 평균 날씨 정보 가져오기
+def get_average_weather_info(nx, ny, region_1, region_2, region_3):
+    serviceKey = "T38Xs/J3skbx5QujsH/ZfPUIDlfyGqvCcjw+DekGON1+Ul+DXg1KueJlW0zUHGEIpidKOPzgyiDqAM8jQZ/dUg=="
+    base_date = datetime.now().strftime("%Y%m%d")
+    base_times = ["0200", "0500", "0800", "1100", "1400", "1700", "2000", "2300"]
+
+    temperatures = []
+    humidities = []
+    wind_speeds = []
+    weather_description = []
+
+    for base_time in base_times:
+        url = "http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst"
+        params = {
+            "serviceKey": serviceKey,
+            "numOfRows": "1000",
+            "pageNo": "1",
+            "dataType": "JSON",
+            "base_date": base_date,
+            "base_time": base_time,
+            "nx": nx,
+            "ny": ny
+        }
+
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            try:
+                data = response.json()
+                if data['response']['header']['resultCode'] == '00':
+                    items = data['response']['body']['items']['item']
+
+                    for item in items:
+                        category = item['category']
+                        fcst_value = item['fcstValue']
+
+                        try:
+                            fcst_value = float(fcst_value)
+                        except ValueError:
+                            if fcst_value == "강수없음":
+                                fcst_value = 0.0
+                            else:
+                                continue
+
+                        if category == 'TMP':  # 현재기온
+                            temperatures.append(fcst_value)
+                        elif category == 'REH':  # 습도
+                            humidities.append(fcst_value)
+                        elif category == 'WSD':  # 풍속
+                            wind_speeds.append(fcst_value)
+                        elif category == 'PTY':  # 강수형태
+                            weather_description.append(str(int(fcst_value)))
+
+            except requests.exceptions.JSONDecodeError as e:
+                log.error(f"JSON decoding failed: {e} - Response text: {response.text}")
+                return None
+        else:
+            log.error(f"HTTP error {response.status_code}")
+            return None
+
+    avg_temp = round(sum(temperatures) / len(temperatures), 1) if temperatures else None
+    avg_humidity = round(sum(humidities) / len(humidities), 1) if humidities else None
+    avg_wind_speed = round(sum(wind_speeds) / len(wind_speeds), 1) if wind_speeds else None
+
+    if '1' in weather_description or '2' in weather_description:
+        avg_weather = '비'
+    elif '3' in weather_description:
+        avg_weather = '눈'
+    elif avg_humidity and avg_humidity >= 70:
+        avg_weather = '구름 많음'
+    else:
+        avg_weather = '맑음'
+
+    weather_info = {
+        "region": f"{region_1}",
+        "base_date": base_date,
+        "average_temp": avg_temp,
+        "average_weather": avg_weather,
+        "average_humidity": avg_humidity,
+        "average_wind_speed": avg_wind_speed
+    }
+
+    return jsonify(weather_info),200
+
+# weather 엔드포인트
+@app.route('/weather', methods=['GET'])
+def weather():
+    lat = float(request.args.get('lat'))
+    lon = float(request.args.get('lon'))
+
+    if not lat or not lon:
+        return jsonify({'error': 'Latitude and Longitude are required'}), 400
+
+    try:
+        nx, ny, region_1, region_2, region_3 = find_closest_region(lat, lon)
+        log.info(f"Converted lat/lon to grid coordinates: nx={nx}, ny={ny}")
+    except TypeError:
+        return jsonify({'error': 'Failed to convert lat/lon to grid coordinates'}), 500
+
+    if nx is None or ny is None:
+        return jsonify({'error': 'Failed to convert lat/lon to grid coordinates'}), 500
+
+    weather_info = get_current_weather_info(nx, ny, region_1, region_2, region_3)
+
+    if weather_info is None:
+        return jsonify({'error': 'Failed to retrieve weather information'}), 500
+
+    # region을 가장 먼저 포함하도록 순서 변경
+    response_data = {
+        'region': weather_info['region'],
+        'currentTemp': weather_info['currentTemp'],
+        'humidity': weather_info['humidity'],
+        'weather': weather_info['weather'],
+        'windSpeed': weather_info['windSpeed']
+    }
+
+    return jsonify(response_data)
+
+@app.route('/clothes_propose', methods=['GET'])
 def clothes_propose():
-    return 'Hello clothes propose!'
+    lat = float(request.args.get('lat'))
+    lon = float(request.args.get('lon'))
 
+    if not lat or not lon:
+        return jsonify({'error': 'Latitude and Longitude are required'}), 400
 
+    try:
+        nx, ny, region_1, region_2, region_3 = find_closest_region(lat, lon)
+        log.info(f"Converted lat/lon to grid coordinates: nx={nx}, ny={ny}")
+    except TypeError:
+        return jsonify({'error': 'Failed to convert lat/lon to grid coordinates'}), 500
 
+    if nx is None or ny is None:
+        return jsonify({'error': 'Failed to convert lat/lon to grid coordinates'}), 500
+
+    weather_info = get_average_weather_info(nx, ny, region_1, region_2, region_3)
+
+    if weather_info is None:
+        return jsonify({'error': 'Failed to retrieve weather information'}), 500
+
+    return jsonify(weather_info), 200
 
 # 옷 추가
 @app.route('/upload', methods=['POST'])
