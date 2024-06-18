@@ -1,4 +1,5 @@
 import pandas as pd
+import py as py
 from flask import Flask, request, jsonify
 import firebase_admin
 from firebase_admin import credentials, firestore, storage
@@ -9,7 +10,20 @@ import os
 import requests
 from datetime import datetime, timedelta
 import urllib.parse
-import math
+import json
+
+import sys
+
+# 현재 파일의 디렉토리 경로를 기준으로 clothes_kmodes와 clothes_detector 폴더의 절대 경로 추가
+current_dir = os.path.dirname(os.path.abspath(__file__))
+clothes_kmodes_dir = os.path.join(current_dir, 'clothes_kmodes')
+clothes_detector_dir = os.path.join(current_dir, 'clothes_detector')
+
+from clothes_kmodes.server_api import run
+from clothes_kmodes import clothes_enum as CLTH
+from clothes_kmodes.config import config as cfg
+import clothes_kmodes.main as clothes_main
+
 
 cred = credentials.Certificate(r"C:/server/flask-server/firebase/serviceAccountKey.json")
 firebase_admin.initialize_app(cred)
@@ -178,6 +192,7 @@ def get_current_weather_info(nx, ny, region_1, region_2, region_3):
                             for item in items:
                                 category = item['category']
                                 fcst_value = item['fcstValue']
+                                fcst_time = item['fcstTime']
 
                                 try:
                                     fcst_value = float(fcst_value)
@@ -185,9 +200,11 @@ def get_current_weather_info(nx, ny, region_1, region_2, region_3):
                                     continue
 
                                 if category == 'TMX':  # 최고기온
-                                    max_temp = fcst_value
+                                    if max_temp is None or fcst_value > max_temp:
+                                        max_temp = fcst_value
                                 elif category == 'TMN':  # 최저기온
-                                    min_temp = fcst_value
+                                    if min_temp is None or fcst_value < min_temp:
+                                        min_temp = fcst_value
 
                             weather_info = {
                                 "region": f"{region_1} {region_2}",
@@ -198,7 +215,6 @@ def get_current_weather_info(nx, ny, region_1, region_2, region_3):
                                 "weather": weather,
                                 "windSpeed": wind_speed
                             }
-
                             return weather_info
                         else:
                             log.error(f"Error: {data['response']['header']['resultMsg']}")
@@ -245,8 +261,8 @@ def weather():
     response_data = {
         'region': weather_info['region'],
         'currentTemp': weather_info['currentTemp'],
-        'maxTemp': weather_info.get('maxTemp'),
-        'minTemp': weather_info.get('minTemp'),
+        'maxTemp': weather_info['maxTemp'],
+        'minTemp': weather_info['minTemp'],
         'humidity': weather_info['humidity'],
         'weather': weather_info['weather'],
         'windSpeed': weather_info['windSpeed']
@@ -255,29 +271,35 @@ def weather():
     return jsonify(response_data), 200
 
 
+
 @app.route('/clothes_propose', methods=['GET'])
 def clothes_propose():
-    lat = float(request.args.get('lat'))
-    lon = float(request.args.get('lon'))
+    age = request.args.get('age')
+    sex = request.args.get('sex')
+    style = request.args.get('style')
+    temperatures = request.args.get('temperatures')
+    weather = request.args.get('weather')
+    humidity = request.args.get('humidity')
+    wind_speed = request.args.get('wind_speed')
 
-    if not lat or not lon:
-        return jsonify({'error': 'Latitude and Longitude are required'}), 400
+    if not age or not sex or not style:
+        return jsonify({'error': 'Age, Sex, and Style are required'}), 400
+
+    if not temperatures or not weather or not humidity or not wind_speed:
+        return jsonify({'error': 'Temperatures, Weather, Humidity, and Wind Speed are required'}), 400
 
     try:
-        nx, ny, region_1, region_2, region_3 = find_closest_region(lat, lon)
-        log.info(f"Converted lat/lon to grid coordinates: nx={nx}, ny={ny}")
-    except TypeError:
-        return jsonify({'error': 'Failed to convert lat/lon to grid coordinates'}), 500
+        # Call the clothes recommendation model
+        top_id, bottom_id = clothes_main.main(age, sex, style, temperatures, weather, humidity, wind_speed)
 
-    if nx is None or ny is None:
-        return jsonify({'error': 'Failed to convert lat/lon to grid coordinates'}), 500
+        response_data = {
+            'top_id': top_id,
+            'bottom_id': bottom_id
+        }
 
-    weather_info = get_current_weather_info(nx, ny, region_1, region_2, region_3)
-
-    if weather_info is None:
-        return jsonify({'error': 'Failed to retrieve weather information'}), 500
-
-    return jsonify(weather_info), 200
+        return jsonify(response_data), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 # 옷 추가
 @app.route('/upload', methods=['POST'])
