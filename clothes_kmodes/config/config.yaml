@@ -1,0 +1,7 @@
+paths:
+  kproto_model_path: "clothes_kmodes/datasets/kproto_model.joblib"
+  final_result_path: "clothes_kmodes/datasets/final_result.csv"
+  final_result_with_cluster_path: 'clothes_kmodes/datasets/final_result_with_clusters.csv'
+  json_path: "clothes_kmodes/datasets/user_clothes.json"
+
+

@@ -1,0 +1,57 @@
+[
+    {
+        "color": "블랙",
+        "id": "2YQdn4nq8Iy4pEbncs1v",
+        "imageName": "",
+        "imageUrl": "https://storage.googleapis.com/todays-clothes-1100f.appspot.com/images/M0VeqB4NzZdLJRvzqJOcY6qFR5N2/%EC%9E%AC%ED%82%B7_",
+        "length": "발목",
+        "material": "우븐",
+        "printing": "무지",
+        "style": "스트리트",
+        "type": "티셔츠"
+    },
+    {
+        "color": "블랙",
+        "id": "6r8btsNpzlW9wDbE1had",
+        "imageName": "ㅂ",
+        "imageUrl": "https://storage.googleapis.com/todays-clothes-1100f.appspot.com/images/M0VeqB4NzZdLJRvzqJOcY6qFR5N2/%ED%8C%AC%EC%B8%A0_%E3%85%82",
+        "length": "노말",
+        "material": "저지",
+        "printing": "무지",
+        "style": "스트리트",
+        "type": "팬츠"
+    },
+    {
+        "color": "브라운",
+        "id": "ApYfiOIEHmlJrbuLTGrr",
+        "imageName": "5",
+        "imageUrl": "https://storage.googleapis.com/todays-clothes-1100f.appspot.com/images/M0VeqB4NzZdLJRvzqJOcY6qFR5N2/%EC%9E%AC%ED%82%B7_5",
+        "length": "노말",
+        "material": "패딩",
+        "printing": "무지",
+        "style": "스트리트",
+        "type": "재킷"
+    },
+    {
+        "color": "브라운",
+        "id": "ImAs1XgJsbRu4mBuhcoB",
+        "imageName": "ㅂ",
+        "imageUrl": "https://storage.googleapis.com/todays-clothes-1100f.appspot.com/images/M0VeqB4NzZdLJRvzqJOcY6qFR5N2/%EC%9E%AC%ED%82%B7_%E3%85%82",
+        "length": "노말",
+        "material": "저지",
+        "printing": "무지",
+        "style": "테스트 스타일",
+        "type": "재킷"
+    },
+    {
+        "color": "브라운",
+        "id": "f1rKPxsRVGO6ImZr9lnY",
+        "imageName": "",
+        "imageUrl": "https://storage.googleapis.com/todays-clothes-1100f.appspot.com/images/M0VeqB4NzZdLJRvzqJOcY6qFR5N2/%ED%8C%AC%EC%B8%A0_",
+        "length": "노말",
+        "material": "저지",
+        "printing": "무지",
+        "style": "스트리트",
+        "type": "팬츠"
+    }
+]
