@@ -11,7 +11,7 @@ import requests
 from datetime import datetime, timedelta
 import urllib.parse
 import json
-
+import logging as log
 import sys
 
 # 현재 파일의 디렉토리 경로를 기준으로 clothes_kmodes와 clothes_detector 폴더의 절대 경로 추가
@@ -275,16 +275,101 @@ def weather():
 
     return jsonify(response_data), 200
 
+
+
+'''
+def get_average_weather_info(nx, ny):
+    serviceKey = "T38Xs/J3skbx5QujsH/ZfPUIDlfyGqvCcjw+DekGON1+Ul+DXg1KueJlW0zUHGEIpidKOPzgyiDqAM8jQZ/dUg=="
+    base_date = datetime.now().strftime("%Y%m%d")
+
+    # 예보 시간대
+    forecast_times = ["0200", "0500", "0800", "1100", "1400", "1700", "2000", "2300"]
+
+    temperatures = []
+    humidities = []
+    wind_speeds = []
+    weather_descriptions = []
+    sky_codes = []
+
+    for base_time in forecast_times:
+        url = "http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst"
+        params = {
+            "serviceKey": serviceKey,
+            "numOfRows": "1000",
+            "pageNo": "1",
+            "dataType": "JSON",
+            "base_date": base_date,
+            "base_time": base_time,
+            "nx": nx,
+            "ny": ny
+        }
+
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            try:
+                data = response.json()
+                if data['response']['header']['resultCode'] == '00':
+                    items = data['response']['body']['items']['item']
+                    for item in items:
+                        category = item['category']
+                        if category == 'TMP':  # 기온
+                            temperatures.append(float(item['fcstValue']))
+                        elif category == 'REH':  # 습도
+                            humidities.append(float(item['fcstValue']))
+                        elif category == 'WSD':  # 풍속
+                            wind_speeds.append(float(item['fcstValue']))
+                        elif category == 'PTY':  # 강수형태
+                            weather_descriptions.append(int(item['fcstValue']))
+                        elif category == 'SKY':  # 하늘상태
+                            sky_codes.append(int(item['fcstValue']))
+                else:
+                    log.error(f"Error: {data['response']['header']['resultMsg']}")
+            except requests.exceptions.JSONDecodeError as e:
+                log.error(f"JSON decoding failed: {e} - Response text: {response.text}")
+        else:
+            log.error(f"HTTP error {response.status_code}")
+
+    avg_temp = round(sum(temperatures) / len(temperatures), 1) if temperatures else None
+    avg_humidity = round(sum(humidities) / len(humidities), 1) if humidities else None
+    avg_wind_speed = round(sum(wind_speeds) / len(wind_speeds), 1) if wind_speeds else None
+
+    # 평균 기상 상태 결정
+    weather = None
+    if any(desc in [1, 2, 5, 6] for desc in weather_descriptions):  # 비, 비/눈, 빗방울, 빗방울눈날림
+        weather = '비'
+    elif any(desc in [3, 7] for desc in weather_descriptions):  # 눈, 눈날림
+        weather = '눈'
+    elif any(sky == 1 for sky in sky_codes):  # 맑음
+        weather = '맑음'
+    elif any(sky == 3 for sky in sky_codes):  # 구름많음
+        weather = '구름 많음'
+    elif any(sky == 4 for sky in sky_codes):  # 흐림
+        weather = '흐림'
+    elif avg_humidity >= 70:
+        weather = '구름 많음'
+    else:
+        weather = '맑음'
+
+    average_weather_info = {
+        "averageTemp": avg_temp,
+        "averageHumidity": avg_humidity,
+        "averageWindSpeed": avg_wind_speed,
+        "averageWeather": weather
+    }
+
+    return average_weather_info
+'''
+
 @app.route('/clothes_propose', methods=['GET'])
 def clothes_propose():
     try:
         age = request.args.get('age')
         sex = request.args.get('sex')
         style = request.args.get('style')
-        temperatures = float(request.args.get('temperatures'))
-        weather = request.args.get('weather')
-        humidity = float(request.args.get('humidity'))
-        wind_speed = float(request.args.get('wind_speed'))
+
+        lat = float(request.args.get('lat'))
+        lon = float(request.args.get('lon'))
+
         recommend_select = int(request.args.get('recommend_select', 0))  # 기본값을 0으로 설정
 
         cloth_color = request.args.get('cloth_color')
@@ -297,14 +382,36 @@ def clothes_propose():
         if not age or not sex or not style:
             return jsonify({'error': 'Age, Sex, and Style are required'}), 400
 
-        if not temperatures or not weather or not humidity or not wind_speed:
-            return jsonify({'error': 'Temperatures, Weather, Humidity, and Wind Speed are required'}), 400
+        if not lat or not lon:
+            return jsonify({'error': 'Latitude and Longitude are required'}), 400
 
-        selected_info = (cloth_color, cloth_print, cloth_material, cloth_length, cloth_category)  # 선택된 옷 정보, 부분 추천 시 사용
+        if recommend_select not in [0, 1, 2]:
+            return jsonify({'error': 'Invalid recommend_select value. Use 0 for both recommendation, 1 for top recommendation, 2 for bottom recommendation'}), 400
+
+        if recommend_select in [1, 2] and (not cloth_color or not cloth_print or not cloth_material or not cloth_length or not cloth_category):
+            return jsonify({'error': 'Cloth attributes are required for partial recommendation'}), 400
+
+        # 위치를 통해 날씨 정보 가져오기
+        nx, ny, region_1, region_2, region_3 = find_closest_region(lat, lon)
+        print(f"Converted lat/lon to grid coordinates: nx={nx}, ny={ny}")
+
+        current_weather_info = get_current_weather_info(nx, ny, region_1, region_2, region_3)
+
+        if current_weather_info is None:
+            return jsonify({'error': 'Failed to retrieve current weather information'}), 500
+
+        temperatures = current_weather_info['currentTemp']
+        weather = current_weather_info['weather']
+        humidity = current_weather_info['humidity']
+        wind_speed = current_weather_info['windSpeed']
+        print(temperatures, weather, humidity, wind_speed)
+
+        selected_info = (
+        cloth_color, cloth_print, cloth_material, cloth_length, cloth_category) if recommend_select in [1, 2] else None
 
         # 옷 추천 모델 호출
-        result = clothes_main.main(age, sex, style, temperatures, weather, humidity, wind_speed,recommend_select, (cloth_color, cloth_print, cloth_material, cloth_length, cloth_category))
-        print("bbbbbb",result)
+        result = clothes_main.main(age, sex, style, temperatures, weather, humidity, wind_speed, recommend_select, selected_info)
+
         if recommend_select == 0:  # 전체 추천
             top_id, bottom_id = result
             response_data = {
@@ -313,10 +420,8 @@ def clothes_propose():
             }
         elif recommend_select == 1:  # 상의 추천
             success, top_clothes = result
-            print(success, top_clothes)
             if success:
                 top_color, top_print, top_material, top_length, top_category, top_id = top_clothes
-                print(top_clothes)
                 response_data = {
                     'top_id': top_id,
                     'top_color': top_color,
@@ -329,7 +434,6 @@ def clothes_propose():
                 response_data = {'error': '상의 추천 실패'}
         elif recommend_select == 2:  # 하의 추천
             success, bottom_clothes = result
-            print("aaaaaaa",success, bottom_clothes)
             if success:
                 bottom_color, bottom_print, bottom_material, bottom_length, bottom_category, bottom_id = bottom_clothes
                 response_data = {
