@@ -1,3 +1,5 @@
+import json
+
 import pandas as pd
 from flask import Flask, request, jsonify
 import firebase_admin
@@ -27,10 +29,11 @@ RESULT_FOLDER = "clothes_detector/result/"
 DATASET_FOLDER = "clothes_detector/dataset/"
 app.config['UPLOAD_FOLDER'] = DATASET_FOLDER
 
+
 # 루트
 @app.route('/')
 def hello_world():
-    return 'Hello World!'
+    return jsonify(), 404
 
 
 # CSV 파일 로드
@@ -239,7 +242,7 @@ def get_current_weather_info(nx, ny, region_1, region_2, region_3):
         return None
 
 
-@app.route('/weather', methods=['GET'])
+@app.route('/weather/get', methods=['GET'])
 def weather():
     lat = float(request.args.get('lat'))
     lon = float(request.args.get('lon'))
@@ -274,30 +277,39 @@ def weather():
     return jsonify(response_data), 200
 
 
-@app.route('/clothes_propose', methods=['GET'])
+# 옷 추천
+@app.route('/clothes/propose', methods=['GET'])
 def clothes_propose():
     try:
         uid = request.args.get('uid')
-        user_doc_ref = db.collection('user').document(uid)
+        user_doc_ref = db.collection('users').document(uid)
         user_doc = user_doc_ref.get()
         user_data = user_doc.to_dict()
 
+        user_closet_doc = user_doc_ref.collection('closet').get()
+        user_clothes = []
+
         age = user_data['age']
         sex = user_data['sex']
+
         style = request.args.get('style')
         lat = float(request.args.get('lat'))
         lon = float(request.args.get('lon'))
-        recommend_flag = int(request.args.get('recommendFlag', 0))  # 기본값을 0으로 설정
+        recommend_flag = int(request.args.get('recommendFlag'))
+        print(f"recommend_flag = {recommend_flag}")
+        recommend_select = 0
 
         if recommend_flag == 0:
             recommend_select = 0
+            for i in user_closet_doc:
+                user_clothes.append({"id": i.id, **i.to_dict()})
 
         elif recommend_flag == 1:
             cloth_id = request.args.get('clothId')
 
             doc_ref = db.collection('users').document(uid).collection('closet').document(cloth_id)
             doc = doc_ref.get()
-            doc_data = doc.to_dict
+            doc_data = doc.to_dict()
 
             cloth_color = doc_data['color']
             cloth_print = doc_data['printing']
@@ -305,10 +317,18 @@ def clothes_propose():
             cloth_length = doc_data['length']
             cloth_category = doc_data['type']
 
-            if cloth_category == top_bottom_chg.top:
+            if cloth_category in top_bottom_chg.top:
                 recommend_select = 2
-            elif cloth_category == top_bottom_chg.bottom:
+                for i in user_closet_doc:
+                    d = i.to_dict()
+                    if d['type'] in top_bottom_chg.bottom:
+                        user_clothes.append({"id": i.id, **i.to_dict()})
+            elif cloth_category in top_bottom_chg.bottom:
                 recommend_select = 1
+                for i in user_closet_doc:
+                    d = i.to_dict()
+                    if d['type'] in top_bottom_chg.top:
+                        user_clothes.append({"id": i.id, **i.to_dict()})
 
         if not age or not sex or not style:
             return jsonify({'error': 'Age, Sex, and Style are required'}), 400
@@ -339,33 +359,48 @@ def clothes_propose():
             cloth_color, cloth_print, cloth_material, cloth_length, cloth_category
         ) if recommend_select in [1, 2] else None
 
+        print(user_clothes)
         # 옷 추천 모델 호출
-        result = clothes_main.main(age, sex, style, temperatures, weather, humidity, wind_speed, recommend_select, selected_info)
+        result = clothes_main.main(age, sex, style, temperatures, weather, humidity, wind_speed, recommend_select, selected_info, user_clothes)
 
         if recommend_select == 0:  # 전체 추천
             top_id, bottom_id = result
-            response_data = jsonify({
-                'top_id': top_id,
-                'bottom_id': bottom_id
-            }), 200
+            data = []
+            if top_id != "상의 없음":
+                doc_ref = db.collection('users').document(uid).collection('closet').document(top_id)
+                doc = doc_ref.get()
+                doc_data = doc.to_dict()
+                data.append(doc_data)
+
+            if bottom_id != "하의 없음":
+                doc_ref = db.collection('users').document(uid).collection('closet').document(bottom_id)
+                doc = doc_ref.get()
+                doc_data = doc.to_dict()
+                data.append(doc_data)
+
+            response_data = jsonify(data), 200
         elif recommend_select == 1:  # 상의 추천
             success, top_clothes = result
+            print(f"success = {success}, top_clothes = {top_clothes}")
             if success:
                 top_color, top_print, top_material, top_length, top_category, top_id = top_clothes
-                response_data = jsonify({
-                    'top_id': top_id
-                }), 200
+                doc_ref = db.collection('users').document(uid).collection('closet').document(top_id)
+                doc = doc_ref.get()
+
+                response_data = jsonify(doc.to_dict()), 200
             else:
-                response_data = jsonify({'error': '상의 추천 실패'}), 500
+                response_data = jsonify({}), 200
         elif recommend_select == 2:  # 하의 추천
             success, bottom_clothes = result
+            print(f"success = {success}, top_clothes = {bottom_clothes}")
             if success:
                 bottom_color, bottom_print, bottom_material, bottom_length, bottom_category, bottom_id = bottom_clothes
-                response_data = jsonify({
-                    'bottom_id': bottom_id
-                }), 200
+                doc_ref = db.collection('users').document(uid).collection('closet').document(bottom_id)
+                doc = doc_ref.get()
+
+                response_data = jsonify(doc.to_dict()), 200
             else:
-                response_data = jsonify({'error': '하의 추천 실패'}), 500
+                response_data = jsonify({}), 200
 
         return response_data
     except Exception as e:
@@ -374,7 +409,7 @@ def clothes_propose():
 
 
 # 옷 id -> 해당 옷 정보
-@app.route('/cloth/info/get', methods=['GET'])
+@app.route('/clothes/info/get', methods=['GET'])
 def get_image_url():
     uid = request.args.get('uid')
     cloth_id = request.args.get('clothId')
@@ -385,7 +420,7 @@ def get_image_url():
 
     if doc.exists:
         doc_data = doc.to_dict()
-        return jsonify({'imageUrl': doc_data}), 200
+        return jsonify(doc_data), 200
     else:
         return jsonify({'error': 'get image url failed'}), 500
 
@@ -433,8 +468,8 @@ def user_info_get():
 
 
 # 옷 추가
-@app.route('/upload', methods=['POST'])
-def upload_image():
+@app.route('/clothes/add', methods=['POST'])
+def add_clothes():
     if 'image' not in request.files:
         log.error('No image file found')
         return jsonify({'error': 'No image file found'}), 400
@@ -522,7 +557,7 @@ def result_folder_clear(uid):
 
 
 # 옷장 가져오기
-@app.route('/clothes/<uid>', methods=['GET'])
+@app.route('/clothes/get/<uid>', methods=['GET'])
 def get_closet(uid):
     try:
         doc_ref = db.collection('users').document(uid).collection('closet')
@@ -540,7 +575,7 @@ def get_closet(uid):
 
 
 # 옷 삭제
-@app.route('/closet/delete/<uid>/<cloth_id>', methods=['DELETE'])
+@app.route('/clothes/delete/<uid>/<cloth_id>', methods=['DELETE'])
 def delete_closet(uid, cloth_id):
     try:
         doc_ref = db.collection('users').document(uid).collection('closet').document(cloth_id)

@@ -154,20 +154,11 @@ def both_recommend(user_info, clothes_attributes):
         return "상의 없음", "하의 없음"
 
 
-def main(age, sex, style, temperatures, weather, humidity, wind_speed, recommend_select, selected_info):
+def main(age, sex, style, temperatures, weather, humidity, wind_speed, recommend_select, selected_info, user_clothes):
     user_info = (age, sex, style, temperatures, weather, humidity, wind_speed)
     # 하의를 먼저할지 상의를 먼저할지는 CLTH.TOP, CLTH.BOTTOM 으로 설정하면 됨
 
     # ==========================================================================================
-    # JSON 파일 경로
-    json_file_path = cfg.json_path
-
-    # JSON 파일 읽기
-    with open(json_file_path, 'r', encoding='utf-8') as file:
-        user_clothes = json.load(file)
-
-    print(user_clothes)
-
     # 각 항목의 필요한 필드를 추출하여 2차원 배열로 저장
     clothes_attributes = [[item['type'], item['color'], item['length'], item['material'], item['printing'], item['id']]
                           for item in user_clothes]
@@ -205,10 +196,12 @@ if __name__ == "__main__":
     cloth_category = "재킷"  # 카테고리
     selected_info = (cloth_color, cloth_print, cloth_material, cloth_length, cloth_category)
 
+    user_clothes = ""
+
     # 전체 추천
     if recommend_select == 0:
-        result = main(age, sex, style, temperatures, weather, humidity, wind_speed, recommend_select, None)
+        result = main(age, sex, style, temperatures, weather, humidity, wind_speed, recommend_select, user_clothes, None)
     # 부분 추천
     else:
-        result = main(age, sex, style, temperatures, weather, humidity, wind_speed, recommend_select, selected_info)[1][
+        result = main(age, sex, style, temperatures, weather, humidity, wind_speed, recommend_select, selected_info, user_clothes)[1][
             5]
