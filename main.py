@@ -1,27 +1,20 @@
 import pandas as pd
-import py as py
 from flask import Flask, request, jsonify
 import firebase_admin
 from firebase_admin import credentials, firestore, storage
 import re
 import logging as log
+
+import top_bottom_chg
 from clothes_detector import detector
 import os
 import requests
 from datetime import datetime, timedelta
 import urllib.parse
-import json
-import logging as log
-import sys
 
 # 현재 파일의 디렉토리 경로를 기준으로 clothes_kmodes와 clothes_detector 폴더의 절대 경로 추가
 current_dir = os.path.dirname(os.path.abspath(__file__))
-clothes_kmodes_dir = os.path.join(current_dir, 'clothes_kmodes')
-clothes_detector_dir = os.path.join(current_dir, 'clothes_detector')
 
-from clothes_kmodes.server_api import run
-from clothes_kmodes import clothes_enum as CLTH
-from clothes_kmodes.config import config as cfg
 import clothes_kmodes.main as clothes_main
 
 cred = credentials.Certificate("flask-server/firebase/serviceAccountKey.json")
@@ -39,9 +32,11 @@ app.config['UPLOAD_FOLDER'] = DATASET_FOLDER
 def hello_world():
     return 'Hello World!'
 
+
 # CSV 파일 로드
-CSV_FILE_PATH = r'C:\server\data\lat_lon_grid_utf8.csv'
+CSV_FILE_PATH = r'data/lat_lon_grid_utf8.csv'
 grid_data = pd.read_csv(CSV_FILE_PATH)
+
 
 def find_closest_region(lat, lon):
     grid_data['경도(초/100)'] = grid_data['경도(초/100)'].astype(float)
@@ -57,6 +52,7 @@ def find_closest_region(lat, lon):
 
     return nx, ny, region_1, region_2, region_3
 
+
 # 가장 가까운 예보 시간을 계산 (초단기예보 및 실황용)
 def get_ultrashort_base_time():
     now = datetime.now()
@@ -68,6 +64,7 @@ def get_ultrashort_base_time():
     base_date = base_time.strftime("%Y%m%d")
     base_time = base_time.strftime("%H%M")
     return base_date, base_time
+
 
 # 가장 가까운 예보 시간을 계산 (단기예보용)
 def get_short_base_time():
@@ -98,6 +95,7 @@ def get_short_base_time():
         base_time = "2000"
         base_date = now.strftime("%Y%m%d")
     return base_date, base_time
+
 
 # 현재 날씨 정보 가져오기 (초단기실황)
 def get_current_weather_info(nx, ny, region_1, region_2, region_3):
@@ -279,21 +277,38 @@ def weather():
 @app.route('/clothes_propose', methods=['GET'])
 def clothes_propose():
     try:
-        age = request.args.get('age')
-        sex = request.args.get('sex')
-        style = request.args.get('style')
+        uid = request.args.get('uid')
+        user_doc_ref = db.collection('user').document(uid)
+        user_doc = user_doc_ref.get()
+        user_data = user_doc.to_dict()
 
+        age = user_data['age']
+        sex = user_data['sex']
+        style = request.args.get('style')
         lat = float(request.args.get('lat'))
         lon = float(request.args.get('lon'))
+        recommend_flag = int(request.args.get('recommendFlag', 0))  # 기본값을 0으로 설정
 
-        recommend_select = int(request.args.get('recommend_select', 0))  # 기본값을 0으로 설정
+        if recommend_flag == 0:
+            recommend_select = 0
 
-        cloth_color = request.args.get('cloth_color')
-        cloth_print = request.args.get('cloth_print')
-        cloth_material = request.args.get('cloth_material')
-        cloth_length = request.args.get('cloth_length')
-        cloth_category = request.args.get('cloth_category')
+        elif recommend_flag == 1:
+            cloth_id = request.args.get('clothId')
 
+            doc_ref = db.collection('users').document(uid).collection('closet').document(cloth_id)
+            doc = doc_ref.get()
+            doc_data = doc.to_dict
+
+            cloth_color = doc_data['color']
+            cloth_print = doc_data['printing']
+            cloth_material = doc_data['style']
+            cloth_length = doc_data['length']
+            cloth_category = doc_data['type']
+
+            if cloth_category == top_bottom_chg.top:
+                recommend_select = 2
+            elif cloth_category == top_bottom_chg.bottom:
+                recommend_select = 1
 
         if not age or not sex or not style:
             return jsonify({'error': 'Age, Sex, and Style are required'}), 400
@@ -309,7 +324,6 @@ def clothes_propose():
 
         # 위치를 통해 날씨 정보 가져오기
         nx, ny, region_1, region_2, region_3 = find_closest_region(lat, lon)
-        print(f"Converted lat/lon to grid coordinates: nx={nx}, ny={ny}")
 
         current_weather_info = get_current_weather_info(nx, ny, region_1, region_2, region_3)
 
@@ -320,54 +334,102 @@ def clothes_propose():
         weather = current_weather_info['weather']
         humidity = current_weather_info['humidity']
         wind_speed = current_weather_info['windSpeed']
-        print(temperatures, weather, humidity, wind_speed)
 
         selected_info = (
-        cloth_color, cloth_print, cloth_material, cloth_length, cloth_category) if recommend_select in [1, 2] else None
+            cloth_color, cloth_print, cloth_material, cloth_length, cloth_category
+        ) if recommend_select in [1, 2] else None
 
         # 옷 추천 모델 호출
         result = clothes_main.main(age, sex, style, temperatures, weather, humidity, wind_speed, recommend_select, selected_info)
 
         if recommend_select == 0:  # 전체 추천
             top_id, bottom_id = result
-            response_data = {
+            response_data = jsonify({
                 'top_id': top_id,
                 'bottom_id': bottom_id
-            }
+            }), 200
         elif recommend_select == 1:  # 상의 추천
             success, top_clothes = result
             if success:
                 top_color, top_print, top_material, top_length, top_category, top_id = top_clothes
-                response_data = {
-                    'top_id': top_id,
-                    'top_color': top_color,
-                    'top_print': top_print,
-                    'top_material': top_material,
-                    'top_length': top_length,
-                    'top_category': top_category
-                }
+                response_data = jsonify({
+                    'top_id': top_id
+                }), 200
             else:
-                response_data = {'error': '상의 추천 실패'}
+                response_data = jsonify({'error': '상의 추천 실패'}), 500
         elif recommend_select == 2:  # 하의 추천
             success, bottom_clothes = result
             if success:
                 bottom_color, bottom_print, bottom_material, bottom_length, bottom_category, bottom_id = bottom_clothes
-                response_data = {
-                    'bottom_id': bottom_id,
-                    'bottom_color': bottom_color,
-                    'bottom_print': bottom_print,
-                    'bottom_material': bottom_material,
-                    'bottom_length': bottom_length,
-                    'bottom_category': bottom_category
-                }
+                response_data = jsonify({
+                    'bottom_id': bottom_id
+                }), 200
             else:
-                response_data = {'error': '하의 추천 실패'}
+                response_data = jsonify({'error': '하의 추천 실패'}), 500
 
-        return jsonify(response_data), 200
+        return response_data
     except Exception as e:
         print(f"예외 발생: {e}")
         return jsonify({'error': str(e)}), 500
 
+
+# 옷 id -> 해당 옷 정보
+@app.route('/cloth/info/get', methods=['GET'])
+def get_image_url():
+    uid = request.args.get('uid')
+    cloth_id = request.args.get('clothId')
+
+    doc_ref = db.collection('users').document(uid).collection('closet').document(cloth_id)
+
+    doc = doc_ref.get()
+
+    if doc.exists:
+        doc_data = doc.to_dict()
+        return jsonify({'imageUrl': doc_data}), 200
+    else:
+        return jsonify({'error': 'get image url failed'}), 500
+
+
+# 사용자 정보 업데이트
+@app.route('/user/info/update', methods=['POST'])
+def user_info_update():
+    try:
+        uid = request.form.get('uid')
+        age = request.form.get('age')
+        sex = request.form.get('sex')
+
+        print(f"uid = {uid}, age = {age}, sex = {sex}")
+
+        doc_ref = db.collection('users').document(uid)
+
+        doc_ref.update({
+            'age': age,
+            'sex': sex,
+        })
+
+        return jsonify({"message": "update successful"}), 200
+    except:
+        return jsonify({"error": "Bad Request"}), 400
+
+
+# 사용자 정보 불러오기
+@app.route('/user/info/get', methods=['GET'])
+def user_info_get():
+    uid = request.args.get('uid')
+
+    if uid is None:
+        return jsonify({'error': 'uid is None'}), 400
+
+    doc_ref = db.collection('users').document(uid)
+    doc = doc_ref.get()
+    doc_data = doc.to_dict()
+
+    if not 'age' in doc_data:
+        doc_data['age'] = ""
+        doc_data['sex'] = ""
+
+    log.info(str(doc_data))
+    return jsonify(doc_data), 200
 
 
 # 옷 추가
