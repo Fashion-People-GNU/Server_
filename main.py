@@ -1,4 +1,5 @@
 import pandas as pd
+import py as py
 from flask import Flask, request, jsonify
 import firebase_admin
 from firebase_admin import credentials, firestore, storage
@@ -10,7 +11,7 @@ import requests
 from datetime import datetime, timedelta
 import urllib.parse
 import json
-
+import logging as log
 import sys
 
 # 현재 파일의 디렉토리 경로를 기준으로 clothes_kmodes와 clothes_detector 폴더의 절대 경로 추가
@@ -127,6 +128,7 @@ def get_current_weather_info(nx, ny, region_1, region_2, region_3):
                 wind_speed = None
                 weather_description = None
                 sky_code = None
+                visibility = None  # 가시거리(안개)
 
                 for item in items:
                     category = item['category']
@@ -147,6 +149,8 @@ def get_current_weather_info(nx, ny, region_1, region_2, region_3):
                         weather_description = int(fcst_value)
                     elif category == 'SKY':  # 구름상태
                         sky_code = int(fcst_value)
+                    elif category == 'VVV':  # 가시거리
+                        visibility = fcst_value
 
                 weather = None
                 if weather_description in [1, 2, 5, 6]:  # 비, 비/눈, 빗방울, 빗방울눈날림
@@ -161,8 +165,11 @@ def get_current_weather_info(nx, ny, region_1, region_2, region_3):
                     weather = '흐림'
                 elif humidity >=70:
                         weather = '구름많음'
+                elif visibility is not None and visibility < 1:
+                    weather = '안개'
                 else:
                     weather = '맑음'
+
 
                 # 단기예보에서 최고/최저 기온 가져오기
                 base_date, base_time = get_short_base_time()
@@ -269,35 +276,99 @@ def weather():
     return jsonify(response_data), 200
 
 
-
 @app.route('/clothes_propose', methods=['GET'])
 def clothes_propose():
-    age = request.args.get('age')
-    sex = request.args.get('sex')
-    style = request.args.get('style')
-    temperatures = request.args.get('temperatures')
-    weather = request.args.get('weather')
-    humidity = request.args.get('humidity')
-    wind_speed = request.args.get('wind_speed')
-
-    if not age or not sex or not style:
-        return jsonify({'error': 'Age, Sex, and Style are required'}), 400
-
-    if not temperatures or not weather or not humidity or not wind_speed:
-        return jsonify({'error': 'Temperatures, Weather, Humidity, and Wind Speed are required'}), 400
-
     try:
-        # Call the clothes recommendation model
-        top_id, bottom_id = clothes_main.main(age, sex, style, temperatures, weather, humidity, wind_speed)
+        age = request.args.get('age')
+        sex = request.args.get('sex')
+        style = request.args.get('style')
 
-        response_data = {
-            'top_id': top_id,
-            'bottom_id': bottom_id
-        }
+        lat = float(request.args.get('lat'))
+        lon = float(request.args.get('lon'))
+
+        recommend_select = int(request.args.get('recommend_select', 0))  # 기본값을 0으로 설정
+
+        cloth_color = request.args.get('cloth_color')
+        cloth_print = request.args.get('cloth_print')
+        cloth_material = request.args.get('cloth_material')
+        cloth_length = request.args.get('cloth_length')
+        cloth_category = request.args.get('cloth_category')
+
+
+        if not age or not sex or not style:
+            return jsonify({'error': 'Age, Sex, and Style are required'}), 400
+
+        if not lat or not lon:
+            return jsonify({'error': 'Latitude and Longitude are required'}), 400
+
+        if recommend_select not in [0, 1, 2]:
+            return jsonify({'error': 'Invalid recommend_select value. Use 0 for both recommendation, 1 for top recommendation, 2 for bottom recommendation'}), 400
+
+        if recommend_select in [1, 2] and (not cloth_color or not cloth_print or not cloth_material or not cloth_length or not cloth_category):
+            return jsonify({'error': 'Cloth attributes are required for partial recommendation'}), 400
+
+        # 위치를 통해 날씨 정보 가져오기
+        nx, ny, region_1, region_2, region_3 = find_closest_region(lat, lon)
+        print(f"Converted lat/lon to grid coordinates: nx={nx}, ny={ny}")
+
+        current_weather_info = get_current_weather_info(nx, ny, region_1, region_2, region_3)
+
+        if current_weather_info is None:
+            return jsonify({'error': 'Failed to retrieve current weather information'}), 500
+
+        temperatures = current_weather_info['currentTemp']
+        weather = current_weather_info['weather']
+        humidity = current_weather_info['humidity']
+        wind_speed = current_weather_info['windSpeed']
+        print(temperatures, weather, humidity, wind_speed)
+
+        selected_info = (
+        cloth_color, cloth_print, cloth_material, cloth_length, cloth_category) if recommend_select in [1, 2] else None
+
+        # 옷 추천 모델 호출
+        result = clothes_main.main(age, sex, style, temperatures, weather, humidity, wind_speed, recommend_select, selected_info)
+
+        if recommend_select == 0:  # 전체 추천
+            top_id, bottom_id = result
+            response_data = {
+                'top_id': top_id,
+                'bottom_id': bottom_id
+            }
+        elif recommend_select == 1:  # 상의 추천
+            success, top_clothes = result
+            if success:
+                top_color, top_print, top_material, top_length, top_category, top_id = top_clothes
+                response_data = {
+                    'top_id': top_id,
+                    'top_color': top_color,
+                    'top_print': top_print,
+                    'top_material': top_material,
+                    'top_length': top_length,
+                    'top_category': top_category
+                }
+            else:
+                response_data = {'error': '상의 추천 실패'}
+        elif recommend_select == 2:  # 하의 추천
+            success, bottom_clothes = result
+            if success:
+                bottom_color, bottom_print, bottom_material, bottom_length, bottom_category, bottom_id = bottom_clothes
+                response_data = {
+                    'bottom_id': bottom_id,
+                    'bottom_color': bottom_color,
+                    'bottom_print': bottom_print,
+                    'bottom_material': bottom_material,
+                    'bottom_length': bottom_length,
+                    'bottom_category': bottom_category
+                }
+            else:
+                response_data = {'error': '하의 추천 실패'}
 
         return jsonify(response_data), 200
     except Exception as e:
+        print(f"예외 발생: {e}")
         return jsonify({'error': str(e)}), 500
+
+
 
 # 옷 추가
 @app.route('/upload', methods=['POST'])
