@@ -382,7 +382,6 @@ def main(opt):
     """Executes YOLOv5 model inference with given options, checking requirements before running the model."""
     check_requirements(ROOT / "requirements.txt", exclude=("tensorboard", "thop"))
     a = run(**vars(opt))
-    print(a)
     return a
 
 

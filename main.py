@@ -4,14 +4,17 @@ import firebase_admin
 from firebase_admin import credentials, firestore, storage
 import re
 import logging as log
+
+from werkzeug.exceptions import NotFound, MethodNotAllowed
+
 import top_bottom_chg
 import weather_api
 from clothes_detector import detector
 import os
-import requests
-from datetime import datetime, timedelta
+from datetime import datetime
 import urllib.parse
 import clothes_kmodes.main as clothes_main
+from logger import log_request
 
 cred = credentials.Certificate("flask-server/firebase/serviceAccountKey.json")
 firebase_admin.initialize_app(cred)
@@ -27,6 +30,7 @@ app.config['UPLOAD_FOLDER'] = DATASET_FOLDER
 # 루트
 @app.route('/')
 def hello_world():
+    log_request(request)
     return jsonify(), 404
 
 
@@ -37,6 +41,7 @@ grid_data = pd.read_csv(CSV_FILE_PATH)
 
 @app.route('/weather/get', methods=['GET'])
 def weather():
+    log_request(request)
     lat = float(request.args.get('lat'))
     lon = float(request.args.get('lon'))
 
@@ -73,6 +78,7 @@ def weather():
 # 옷 추천
 @app.route('/clothes/propose', methods=['GET'])
 def clothes_propose():
+    log_request(request)
     try:
         uid = request.args.get('uid')
         user_doc_ref = db.collection('users').document(uid)
@@ -139,6 +145,8 @@ def clothes_propose():
 
         current_weather_info = weather_api.get_current_weather_info(nx, ny, region_1, region_2, region_3)
 
+        print(f"user_clothes = {user_clothes}, weather = {current_weather_info}")
+
         if current_weather_info is None:
             return jsonify({'error': 'Failed to retrieve current weather information'}), 500
 
@@ -156,28 +164,30 @@ def clothes_propose():
 
         if recommend_select == 0:  # 전체 추천
             top_id, bottom_id = result
+
             data = []
             if top_id != "상의 없음":
                 doc_ref = db.collection('users').document(uid).collection('closet').document(top_id)
                 doc = doc_ref.get()
-                doc_data = doc.to_dict()
+                doc_data = {"id": top_id, **doc.to_dict()}
                 data.append(doc_data)
 
             if bottom_id != "하의 없음":
                 doc_ref = db.collection('users').document(uid).collection('closet').document(bottom_id)
                 doc = doc_ref.get()
-                doc_data = doc.to_dict()
+                doc_data = {"id": bottom_id, **doc.to_dict()}
                 data.append(doc_data)
 
             response_data = jsonify(data), 200
         elif recommend_select == 1:  # 상의 추천
             success, top_clothes = result
+            print(f"top- {top_clothes}")
             if success:
                 top_color, top_print, top_material, top_length, top_category, top_id = top_clothes
                 doc_ref = db.collection('users').document(uid).collection('closet').document(top_id)
                 doc = doc_ref.get()
 
-                response_data = jsonify(doc.to_dict()), 200
+                response_data = jsonify({"id": top_id, **doc.to_dict()}), 200
             else:
                 response_data = jsonify({}), 200
         elif recommend_select == 2:  # 하의 추천
@@ -187,7 +197,7 @@ def clothes_propose():
                 doc_ref = db.collection('users').document(uid).collection('closet').document(bottom_id)
                 doc = doc_ref.get()
 
-                response_data = jsonify(doc.to_dict()), 200
+                response_data = jsonify({"id": bottom_id, **doc.to_dict()}), 200
             else:
                 response_data = jsonify({}), 200
 
@@ -200,6 +210,7 @@ def clothes_propose():
 # 옷 id -> 해당 옷 정보
 @app.route('/clothes/info/get', methods=['GET'])
 def get_image_url():
+    log_request(request)
     uid = request.args.get('uid')
     cloth_id = request.args.get('clothId')
 
@@ -217,6 +228,7 @@ def get_image_url():
 # 사용자 정보 업데이트
 @app.route('/user/info/update', methods=['POST'])
 def user_info_update():
+    log_request(request)
     try:
         uid = request.form.get('uid')
         age = request.form.get('age')
@@ -237,6 +249,7 @@ def user_info_update():
 # 사용자 정보 불러오기
 @app.route('/user/info/get', methods=['GET'])
 def user_info_get():
+    log_request(request)
     uid = request.args.get('uid')
 
     if uid is None:
@@ -257,6 +270,7 @@ def user_info_get():
 # 옷 추가
 @app.route('/clothes/add', methods=['POST'])
 def add_clothes():
+    log_request(request)
     if 'image' not in request.files:
         log.error('No image file found')
         return jsonify({'error': 'No image file found'}), 400
@@ -346,6 +360,7 @@ def result_folder_clear(uid):
 # 옷장 가져오기
 @app.route('/clothes/get/<uid>', methods=['GET'])
 def get_closet(uid):
+    log_request(request)
     try:
         doc_ref = db.collection('users').document(uid).collection('closet')
         docs = doc_ref.get()
@@ -364,6 +379,7 @@ def get_closet(uid):
 # 옷 삭제
 @app.route('/clothes/delete/<uid>/<cloth_id>', methods=['DELETE'])
 def delete_closet(uid, cloth_id):
+    log_request(request)
     try:
         doc_ref = db.collection('users').document(uid).collection('closet').document(cloth_id)
         doc = doc_ref.get()
@@ -395,6 +411,22 @@ def delete_closet(uid, cloth_id):
     except Exception as e:
         log.error(str(e))
         return jsonify({'error': "failed delete cloth"}), 500
+
+
+@app.errorhandler(Exception)
+def handle_error(error):
+    if isinstance(error, NotFound):
+        error_message = '404 Not Found'
+        status_code = 404
+    elif isinstance(error, MethodNotAllowed):
+        error_message = '405 Method Not Allowed'
+        status_code = 405
+    else:
+        error_message = '500 Internal Server Error'
+        status_code = 500
+
+    log_request(request, success=False, error_message=error_message)
+    return error_message, status_code
 
 
 if __name__ == '__main__':
